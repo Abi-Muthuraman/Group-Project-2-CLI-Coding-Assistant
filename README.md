@@ -11,7 +11,7 @@ It works with local models through Ollama and cloud models through Groq.
 
 Status
 
-Planning phase. See planning/PROJECT_PLAN.md for the architecture, team roles, and timeline.
+Planning phase. See forge_project_plan.pdf for the architecture, team roles, and timeline.
 
 Team
 Varshita Yarabadi
