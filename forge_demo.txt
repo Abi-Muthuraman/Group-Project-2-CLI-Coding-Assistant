@@ -1,0 +1,1 @@
+Forge filesystem MCP test: the secret word is purple.
