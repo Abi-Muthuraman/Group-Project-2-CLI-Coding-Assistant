@@ -42,20 +42,11 @@ class Agent:
         doc_searches = 0
         for _ in range(self.max_iterations):
             try:
-                content, tool_calls = self._stream_turn(messages, tools)
+                content, tool_calls = await self._call_model(messages, tools)
             except Exception as exc:
                 error = str(exc)
-                # Groq's free tier allows ~8,000 tokens per minute. If we hit it,
-                # wait the time Groq suggests (plus a little) and try the same step again.
-                if "rate_limit_exceeded" in error or "Error code: 429" in error:
-                    match = re.search(r"try again in ([\d.]+)(ms|s)", error)
-                    wait = float(match.group(1)) / (1000 if match.group(2) == "ms" else 1) if match else 10
-                    wait = min(wait + 2, 30)
-                    with ui.console.status(f"[bold]Groq rate limit hit, waiting {wait:.0f}s...[/]", spinner="dots"):
-                        await asyncio.sleep(wait)
-                    continue
                 # Groq rejects tool calls that don't match the tool's schema
-                # (for example a missing required argument). Tell the model and let it retry.
+                # (for example a missing argument or broken JSON). Tell the model and let it retry.
                 retryable = ("tool call validation failed", "tool_use_failed", "Failed to parse tool call")
                 if not any(phrase in error for phrase in retryable):
                     raise
@@ -116,6 +107,27 @@ class Agent:
         ui.warn(message)
         return message
 
+    async def _call_model(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> tuple[str, list[dict[str, str]]]:
+        """Call the LLM, waiting and retrying when Groq's rate limit is hit.
+
+        Groq's free tier allows about 8,000 tokens per minute. Waiting here
+        does not use up any of the agent's steps.
+        """
+        for attempt in range(1, 6):
+            try:
+                return self._stream_turn(messages, tools)
+            except Exception as exc:
+                error = str(exc)
+                if "rate_limit_exceeded" not in error and "Error code: 429" not in error:
+                    raise
+                match = re.search(r"try again in ([\d.]+)(ms|s)", error)
+                suggested = float(match.group(1)) / (1000 if match.group(2) == "ms" else 1) if match else 0
+                wait = min(max(suggested + 2, 10 * attempt), 60)
+                ui.warn(f"Groq rate limit hit. Waiting {wait:.0f}s before retrying (attempt {attempt} of 5).")
+                with ui.console.status("[bold]Waiting for the rate limit to reset...[/]", spinner="dots"):
+                    await asyncio.sleep(wait)
+        raise RuntimeError("Groq's rate limit is still full. Wait a minute and try again.")
+
     def _stream_turn(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> tuple[str, list[dict[str, str]]]:
         """Ask the LLM for its next step, streaming the reply to the screen.
 
@@ -156,7 +168,6 @@ class Agent:
                         slot["name"] += piece.function.name
                     if piece.function and piece.function.arguments:
                         slot["arguments"] += piece.function.arguments
-        
         finally:
             status.stop()
             if live is not None:
