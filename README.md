@@ -61,7 +61,7 @@ python rag_server/download_docs.py
 python rag_server/ingest.py
 ```
 
-This downloads the LangChain docs, splits them into about 1,200 chunks, embeds them, and saves them to `rag_server/chroma_db/`. Every later session reuses this database, so you never need to run these again unless you want to rebuild with `python rag_server/ingest.py --rebuild`.
+This downloads the LangChain docs, splits them into about 1,300 chunks, embeds them, and saves them to `rag_server/chroma_db/`. Every later session reuses this database, so you never need to run these again unless you want to rebuild with `python rag_server/ingest.py --rebuild`.
 
 **5. Run Forge**
 

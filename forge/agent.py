@@ -1,5 +1,7 @@
 """simple tool-calling loop using OpenAI compatible chat API."""
+import asyncio
 import json
+import re
 from typing import Any
 
 from rich.live import Live
@@ -8,10 +10,11 @@ from . import ui
 from .tool_executor import SHELL_TOOL_NAME, SHELL_TOOL_SCHEMA, ToolExecutor
 
 SYSTEM_PROMPT = """You are FORGE, a command-line AI coding assistant. Help with code in the current workspace. 
-Use the available tools when needed. Explain what you plan on doing. Do not claim a tool succeeeded unless you have confirmation of the success. 
+Use the available tools when needed. Explain what you plan on doing. Do not claim a tool succeeded unless you have confirmation of the success. 
 Prefer small, reversible changes. The shell tool is available for running one command at a time. Do not chain commands or use redirection. 
 It doesn't support shell operators.
-When you use search_langchain_docs, base any code on the documentation it returns and name the page you used."""
+When you use search_langchain_docs, base any code on the documentation it returns and name the page you used.
+Do not search for the same topic more than twice. Once you have enough information, do the task instead of searching again."""
 
 class Agent:
     def __init__(self, client: Any, model: str, mcp_client: Any, executor: ToolExecutor, max_iterations: int = 8):
@@ -36,8 +39,32 @@ class Agent:
             {"role": "user", "content": user_prompt},
         ]
         tools = self._get_tools()
+        doc_searches = 0
         for _ in range(self.max_iterations):
-            content, tool_calls = self._stream_turn(messages, tools)
+            try:
+                content, tool_calls = self._stream_turn(messages, tools)
+            except Exception as exc:
+                error = str(exc)
+                # Groq's free tier allows ~8,000 tokens per minute. If we hit it,
+                # wait the time Groq suggests (plus a little) and try the same step again.
+                if "rate_limit_exceeded" in error or "Error code: 429" in error:
+                    match = re.search(r"try again in ([\d.]+)(ms|s)", error)
+                    wait = float(match.group(1)) / (1000 if match.group(2) == "ms" else 1) if match else 10
+                    wait = min(wait + 2, 30)
+                    with ui.console.status(f"[bold]Groq rate limit hit, waiting {wait:.0f}s...[/]", spinner="dots"):
+                        await asyncio.sleep(wait)
+                    continue
+                # Groq rejects tool calls that don't match the tool's schema
+                # (for example a missing required argument). Tell the model and let it retry.
+                retryable = ("tool call validation failed", "tool_use_failed", "Failed to parse tool call")
+                if not any(phrase in error for phrase in retryable):
+                    raise
+                ui.warn("The model sent an invalid tool call. Asking it to try again.")
+                messages.append({
+                    "role": "user",
+                    "content": f"Your last tool call was rejected: {exc}. Call the tool again with all required arguments.",
+                })
+                continue
             assistant_message: dict[str, Any] = {"role": "assistant", "content": content}
             if tool_calls:
                 assistant_message["tool_calls"] = [
@@ -61,8 +88,14 @@ class Agent:
                     if not isinstance(arguments, dict):
                         raise ValueError("Tool arguments must be a JSON object.")
                     tool_name = call["name"]
+                    if tool_name == "search_langchain_docs":
+                        doc_searches += 1
+                    # Stop the model from searching the docs over and over
+                    if tool_name == "search_langchain_docs" and doc_searches > 2:
+                        result = "You already searched the docs twice. Do not search again. Complete the task with what you found."
+                        ui.warn("Docs already searched twice, telling the model to finish the task.")
                     # Every tool goes through the executor so confirm mode applies to all of them
-                    if tool_name == SHELL_TOOL_NAME or self.mcp_client.server_for(tool_name) is not None:
+                    elif tool_name == SHELL_TOOL_NAME or self.mcp_client.server_for(tool_name) is not None:
                         result = await self.executor.execute(tool_name, arguments)
                     else:
                         result = (
@@ -110,8 +143,8 @@ class Agent:
                 if delta.content:
                     if live is None:
                         status.stop()
-                        live = Live(ui.answer(""), console=ui.console,
-                                    refresh_per_second=12, vertical_overflow="visible")
+                        live = Live(ui.answer(""), console=ui.console, refresh_per_second=12,
+                                    vertical_overflow="ellipsis", transient=True)
                         live.start()
                     content += delta.content
                     live.update(ui.answer(content))
@@ -123,8 +156,12 @@ class Agent:
                         slot["name"] += piece.function.name
                     if piece.function and piece.function.arguments:
                         slot["arguments"] += piece.function.arguments
+        
         finally:
             status.stop()
             if live is not None:
                 live.stop()
+        # The live view only shows what fits on screen, so print the full answer once at the end
+        if content:
+            ui.console.print(ui.answer(content))
         return content, [calls[i] for i in sorted(calls)]

@@ -21,6 +21,8 @@ load_dotenv(REPO_ROOT / ".env")
 # ---- Where things are stored ----
 # Raw LangChain docs downloaded by download_docs.py
 DOCS_DIR = BASE_DIR / "data" / "langchain_docs"
+# Code examples live in separate snippet files that the doc pages import
+SNIPPETS_DIR = BASE_DIR / "data" / "snippets"
 # Chroma saves the vector database here so we only build it once
 CHROMA_DIR = BASE_DIR / "chroma_db"
 COLLECTION_NAME = "langchain_docs"
@@ -29,6 +31,7 @@ COLLECTION_NAME = "langchain_docs"
 DOCS_REPO_URL = "https://github.com/langchain-ai/docs.git"
 # Only the core LangChain Python docs, not every integration page
 DOCS_SUBFOLDER = "src/oss/langchain"
+SNIPPETS_SUBFOLDER = "src/snippets"
 # Subfolders to skip: the frontend pages are React/TypeScript, not Python
 SKIP_FOLDERS = {"frontend"}
 

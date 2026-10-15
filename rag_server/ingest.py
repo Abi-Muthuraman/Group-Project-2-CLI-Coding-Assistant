@@ -3,7 +3,8 @@ One-time build of the vector database.
 
 Steps:
   1. Load every .mdx page from the downloaded LangChain docs
-  2. Clean out the website-only markup (JSX components, JavaScript examples)
+  2. Put the code examples back into each page (the docs keep them in
+     separate snippet files), then clean out website-only markup
   3. Split each page into overlapping chunks
   4. Embed the chunks with sentence-transformers
   5. Store them in Chroma, saved to rag_server/chroma_db/
@@ -16,10 +17,11 @@ After this runs once, every assistant session reuses the saved database.
 
 import argparse
 import re
+import textwrap
 
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 
-from config import CHUNK_OVERLAP, CHUNK_SIZE, DOCS_DIR, SKIP_FOLDERS
+from config import CHUNK_OVERLAP, CHUNK_SIZE, DOCS_DIR, SKIP_FOLDERS, SNIPPETS_DIR
 from store import delete_collection, embed, get_collection, log
 
 BATCH_SIZE = 128  # chunks embedded and stored per batch
@@ -39,6 +41,41 @@ def split_frontmatter(raw):
                 title = match.group(1).strip().strip("\"'")
             raw = raw[end + 4:]
     return title, raw
+
+
+# The docs keep most code examples in separate files and pull them in like:
+#   import ShortTermMemoryUsagePy from '/snippets/code-samples/short-term-memory-usage-py.mdx';
+#   ...
+#   <ShortTermMemoryUsagePy />
+IMPORT_RE = re.compile(r"^import\s+(\w+)\s+from\s+'/snippets/([^']+)';?\s*$", re.MULTILINE)
+
+
+def snippet_code(path):
+    """Read a snippet file and return its first code block.
+
+    Many snippets show the same code once per model provider, so the first
+    version is enough and keeps chunks small.
+    """
+    raw = path.read_text(encoding="utf-8")
+    match = re.search(r"^[ \t]*```.*?^[ \t]*```", raw, re.MULTILINE | re.DOTALL)
+    code = textwrap.dedent(match.group(0) if match else raw)
+    # "```python Google" -> "```python"
+    return re.sub(r"^```(\w+).*$", r"```\1", code, count=1, flags=re.MULTILINE)
+
+
+def inline_snippets(text):
+    """Replace <SnippetName /> tags with the code they stand for."""
+    imports = {m.group(1): SNIPPETS_DIR / m.group(2) for m in IMPORT_RE.finditer(text)}
+
+    def replace(match):
+        path = imports.get(match.group(1))
+        if path is None:
+            return match.group(0)  # not a snippet, clean_mdx removes it later
+        if "-js" in path.name or not path.exists():
+            return ""  # we only keep Python examples
+        return "\n" + snippet_code(path) + "\n"
+
+    return re.sub(r"<(\w+)\s*/>", replace, text)
 
 
 def clean_mdx(text):
@@ -90,6 +127,8 @@ def clean_mdx(text):
         lines_out.append(line)
 
     cleaned = "\n".join(lines_out)
+    # Drop the docs site's line-highlight markers, e.g. "# [!code highlight]"
+    cleaned = re.sub(r"[ \t]*# \[!code [^\]]*\]", "", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
@@ -100,7 +139,7 @@ def load_pages():
         if SKIP_FOLDERS & set(path.relative_to(DOCS_DIR).parts):
             continue
         title, body = split_frontmatter(path.read_text(encoding="utf-8"))
-        body = clean_mdx(body)
+        body = clean_mdx(inline_snippets(body))
         if len(body) < 50:  # skip empty or stub pages
             continue
         rel = path.relative_to(DOCS_DIR).with_suffix("").as_posix()

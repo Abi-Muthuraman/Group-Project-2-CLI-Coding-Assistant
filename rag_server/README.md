@@ -4,7 +4,7 @@ A local MCP server that answers questions from the LangChain Python docs. It use
 
 ## How it works
 
-**Build once (`ingest.py`):** load the docs, clean out website markup, split them into chunks of about 1000 characters, embed them with `all-MiniLM-L6-v2`, and save everything to Chroma in `rag_server/chroma_db/`. Every later session reuses this database.
+**Build once (`ingest.py`):** load the docs, put back the code examples they import from separate snippet files, clean out website markup, split them into chunks of about 1000 characters, embed them with `all-MiniLM-L6-v2`, and save everything to Chroma in `rag_server/chroma_db/`. Every later session reuses this database.
 
 **Every search (`crag.py`):**
 
