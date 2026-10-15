@@ -1,0 +1,7 @@
+# Custom RAG MCP server
+chromadb>=1.0
+langchain-text-splitters>=0.3
+langchain-groq>=0.3
+langchain-ollama>=0.3
+mcp>=1.24   # server works on both 1.x and 2.x
+python-dotenv>=1.0

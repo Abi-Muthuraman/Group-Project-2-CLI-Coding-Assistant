@@ -37,11 +37,11 @@ def build_servers() -> list[ServerConfig]:
             env={"TAVILY_API_KEY": os.getenv("TAVILY_API_KEY", "")},
             enabled=bool(os.getenv("TAVILY_API_KEY")),
         ),
-        # Varshita RAG server
+        #  RAG server
         ServerConfig(
             name="rag",
             command=sys.executable,
-            args=["-m", "rag_server.server"],
+            args=[str(PROJECT_ROOT / "rag_server" / "server.py")],
             enabled=(PROJECT_ROOT / "rag_server" / "server.py").exists(),
         ),
     ]

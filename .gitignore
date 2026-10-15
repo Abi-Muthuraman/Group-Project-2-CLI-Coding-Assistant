@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+rag_server/data/
+rag_server/chroma_db/
+.DS_Store

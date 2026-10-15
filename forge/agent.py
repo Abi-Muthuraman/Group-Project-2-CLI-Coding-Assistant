@@ -2,7 +2,7 @@
 import json
 from typing import Any
 
-from .tool_executor import SHELL_TOOL_SCHEMA, ToolExecutor
+from .tool_executor import SHELL_TOOL_NAME, SHELL_TOOL_SCHEMA, ToolExecutor
 
 SYSTEM_PROMPT = """You are FORGE, a command-line AI coding assistant. Help with code in the current workspace. 
 Use the available tools when needed. Explain what you plan on doing. Do not claim a tool succeeeded unless you have confirmation of the success. 
@@ -61,17 +61,20 @@ class Agent:
                     if not isinstance(arguments, dict):
                         raise ValueError("Tool arguments must be a JSON object.")
                     tool_name = call.function.name
-                    if tool_name == "run_shell_comand":
+                    # Every tool goes through the executor so confirm mode applies to all of them
+                    if tool_name == SHELL_TOOL_NAME or self.mcp_client.server_for(tool_name) is not None:
                         result = await self.executor.execute(tool_name, arguments)
-                    elif self.mcp_client.server_for(tool_name) is not None:
-                        result = await self.mcp_client.call_tool(tool_name, arguments)
                     else:
                         result = (
-                            f"Error: tool '{tool_name}' is not available."
+                            f"Error: tool '{tool_name}' is not available. "
                             "Use only the tools available in the list"
                         )
                 except (json.JSONDecodeError, ValueError) as exc:
                     result = f"Invalid tool arguments: {exc}"
-                messages.append({"role": "tool", "tool_call_id": call.id, "content": str(result)})
+                # Keep tool output short so we stay under Groq's free-tier token limit
+                result = str(result)
+                if len(result) > 4000:
+                    result = result[:4000] + "\n...(output truncated)"
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
 
         return f"Stopped after reaching the {self.max_iterations}-iteration limit. Please try a smaller request."

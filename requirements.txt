@@ -1,3 +1,10 @@
+# Agent
 openai>=1.40.0
 python-dotenv>=1.0.0
-mcp>=1.0.0
+mcp>=1.24
+
+# Custom RAG server (rag_server/)
+chromadb>=1.0
+langchain-text-splitters>=0.3
+langchain-groq>=0.3
+langchain-ollama>=0.3

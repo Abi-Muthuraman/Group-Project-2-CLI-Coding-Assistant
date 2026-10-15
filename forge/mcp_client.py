@@ -56,9 +56,10 @@ class MCPClient:
                     "function": {
                         "name": name,
                         "description": tool.description or "",
-                        "parameters": tool.input_schema
-                        if hasattr(tool, "inputSchema")
-                        else tool.input_schema,
+                        # mcp 1.x calls it inputSchema, mcp 2.x calls it input_schema
+                        "parameters": getattr(tool, "inputSchema", None)
+                        or getattr(tool, "input_schema", None)
+                        or {"type": "object", "properties": {}},
                     },
                 }
             )
