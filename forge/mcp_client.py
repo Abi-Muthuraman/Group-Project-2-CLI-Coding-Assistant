@@ -1,3 +1,5 @@
+import os
+from collections import Counter
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import Any
@@ -20,6 +22,9 @@ class MCPClient:
         self._routes: dict[str, _Route] = {}
         self._schemas: list[dict[str, Any]] = []
         self.status: dict[str, str] = {}
+        # Servers print startup banners and logs to stderr. Send them to a
+        # null file so they don't clutter the CLI (FORGE_DEBUG=1 shows them).
+        self._errlog = None if os.getenv("FORGE_DEBUG") else open(os.devnull, "w")
 
     async def __aenter__(self) -> "MCPClient":
         await self.connect_all()
@@ -41,7 +46,10 @@ class MCPClient:
                 
     async def _connect(self, cfg: ServerConfig) -> None:
         params = StdioServerParameters(command=cfg.command, args=cfg.args, env=cfg.env or None)
-        read, write = await self._stack.enter_async_context(stdio_client(params))
+        if self._errlog is not None:
+            read, write = await self._stack.enter_async_context(stdio_client(params, errlog=self._errlog))
+        else:
+            read, write = await self._stack.enter_async_context(stdio_client(params))
         session = await self._stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
  
@@ -67,6 +75,10 @@ class MCPClient:
     def get_tools(self) -> list[dict[str, Any]]:
         return list(self._schemas)
 
+    def tool_counts(self) -> dict[str, int]:
+        """How many tools each server provides, for the startup table."""
+        return dict(Counter(route.server for route in self._routes.values()))
+
     def server_for(self, tool_name: str) -> str | None:
         route = self._routes.get(tool_name)
         return route.server if route else None
@@ -87,6 +99,8 @@ class MCPClient:
 
     async def close(self) -> None:
             await self._stack.aclose()
+            if self._errlog is not None:
+                self._errlog.close()
 
     
         

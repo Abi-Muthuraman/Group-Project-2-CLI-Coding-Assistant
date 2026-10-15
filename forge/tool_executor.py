@@ -4,6 +4,8 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from . import ui
+
 SHELL_TOOL_NAME = "run_shell_command"
 SHELL_TOOL_SCHEMA: dict[str, Any] = {
     "type": "function",
@@ -33,21 +35,28 @@ class ToolExecutor:
         self.timeout = timeout
 
     def _approved(self, name: str, arguments: dict[str, Any]) -> bool:
+        """Show the tool call. In confirm mode, ask before running it."""
+        server = "forge (shell)" if name == SHELL_TOOL_NAME else (self.mcp_client.server_for(name) or "unknown")
+        ui.tool_call(name, arguments, server)
         if self.mode == "auto":
             return True
-        print(f"\nTool requested: {name}\nArguments: {arguments}")
-        return input("Run this tool? [y/N]: ").strip().lower() in {"y", "yes"}    
+        return ui.confirm()
 
     async def execute(self, name: str, arguments: dict[str, Any] | None = None) -> str:
         arguments = arguments or {}
         if not self._approved(name, arguments):
+            ui.info("  Skipped.")
             return "Tool call cancelled by user."
-        if name == SHELL_TOOL_NAME:
-            return await self._run_shell(arguments)
-        try:
-            return await self.mcp_client.call_tool(name, arguments)
-        except Exception as exc:
-            return f"Tool execution error: {exc}"
+        with ui.console.status(f"[bold]Running {name}...[/]", spinner="dots"):
+            if name == SHELL_TOOL_NAME:
+                result = await self._run_shell(arguments)
+            else:
+                try:
+                    result = await self.mcp_client.call_tool(name, arguments)
+                except Exception as exc:
+                    result = f"Tool execution error: {exc}"
+        ui.tool_result(name, str(result))
+        return result
 
     async def _run_shell(self, arguments: dict[str, Any]) -> str:
         command = arguments.get("command")
